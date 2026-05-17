@@ -1,0 +1,7 @@
+.env
+audio_output/
+data/indicators_cache.json
+__pycache__/
+*.pyc
+.venv/
+venv/
