@@ -258,14 +258,26 @@ CRITICAL: Output ONLY the {language_name} text. No English. No labels. No header
             return r.content[0].text.strip()
 
         elif ai == "gemini":
-            import google.generativeai as genai
-            genai.configure(api_key=GEMINI_API_KEY)
-            for model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]:
-                try:
-                    r = genai.GenerativeModel(model).generate_content(prompt)
-                    return r.text.strip()
-                except Exception:
-                    continue
+            try:
+                # Try new google-genai package first
+                from google import genai as new_genai
+                client = new_genai.Client(api_key=GEMINI_API_KEY)
+                for model in ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash"]:
+                    try:
+                        r = client.models.generate_content(model=model, contents=prompt)
+                        return r.text.strip()
+                    except Exception:
+                        continue
+            except ImportError:
+                # Fall back to old google-generativeai package
+                import google.generativeai as genai
+                genai.configure(api_key=GEMINI_API_KEY)
+                for model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]:
+                    try:
+                        r = genai.GenerativeModel(model).generate_content(prompt)
+                        return r.text.strip()
+                    except Exception:
+                        continue
 
         elif ai == "gpt":
             from openai import OpenAI
@@ -368,13 +380,72 @@ def main():
     print("=" * 60)
 
     # ── Choose AI ──
+    global ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY
+
     if not args.ai:
         print("\n🤖 Which AI should narrate?")
-        print("  1. Claude  (Anthropic) — ANTHROPIC_API_KEY")
-        print("  2. GPT-4   (OpenAI)    — OPENAI_API_KEY")
-        print("  3. Gemini  (Google)    — GEMINI_API_KEY  ← FREE")
+        print("  1. Claude  (Anthropic) — free credits at console.anthropic.com")
+        print("  2. GPT-4   (OpenAI)    — paid, platform.openai.com")
+        print("  3. Gemini  (Google)    — FREE at aistudio.google.com ← recommended")
         choice = input("\nEnter 1 / 2 / 3: ").strip()
         args.ai = {"1": "claude", "2": "gpt", "3": "gemini"}.get(choice, "gemini")
+
+    # ── Ask for API key + test it immediately ──
+    key_urls = {
+        "gemini": "aistudio.google.com → Get API Key (FREE)",
+        "claude": "console.anthropic.com → API Keys",
+        "gpt":    "platform.openai.com → API Keys"
+    }
+
+    def test_key(ai, key):
+        """Quick test to verify the key works before proceeding."""
+        try:
+            if ai == "gemini":
+                try:
+                    from google import genai as new_genai
+                    c = new_genai.Client(api_key=key)
+                    c.models.generate_content(model="gemini-2.0-flash", contents="Say OK")
+                except ImportError:
+                    import google.generativeai as genai
+                    genai.configure(api_key=key)
+                    genai.GenerativeModel("gemini-1.5-flash").generate_content("Say OK")
+            elif ai == "claude":
+                Anthropic(api_key=key).messages.create(
+                    model="claude-sonnet-4-5", max_tokens=5,
+                    messages=[{"role":"user","content":"Say OK"}]
+                )
+            elif ai == "gpt":
+                from openai import OpenAI
+                OpenAI(api_key=key).chat.completions.create(
+                    model="gpt-4o", max_tokens=5,
+                    messages=[{"role":"user","content":"Say OK"}]
+                )
+            return True
+        except Exception as e:
+            print(f"  ❌ Key test failed: {e}")
+            return False
+
+    # Get existing key or ask for it, then test
+    key_map = {"gemini": GEMINI_API_KEY, "claude": ANTHROPIC_API_KEY, "gpt": OPENAI_API_KEY}
+    current_key = key_map.get(args.ai, "")
+
+    while True:
+        if not current_key:
+            print(f"\n🔑 Paste your {args.ai.upper()} API key:")
+            print(f"   Get it free at: {key_urls[args.ai]}")
+            current_key = input("   Key: ").strip()
+
+        print(f"\n🧪 Testing {args.ai.upper()} key...")
+        if test_key(args.ai, current_key):
+            # Save the working key
+            if args.ai == "gemini":   GEMINI_API_KEY    = current_key
+            elif args.ai == "claude": ANTHROPIC_API_KEY = current_key
+            elif args.ai == "gpt":    OPENAI_API_KEY    = current_key
+            print(f"✅ {args.ai.upper()} key verified! Ready to go.\n")
+            break
+        else:
+            print(f"⚠️  That key didn't work. Please try again.")
+            current_key = ""  # Reset so it asks again
 
     # ── Choose Region ──
     if not args.region:
